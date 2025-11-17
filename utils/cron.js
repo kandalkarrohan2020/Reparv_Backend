@@ -44,6 +44,21 @@ const spApp = admin.initializeApp(
   "salespersonApp"
 );
 
+
+//PROJECT 
+const projectpartnerServiceAccount = JSON.parse(
+  process.env.FIREBASE_SERVICE_ACCOUNT_PROJECT
+);
+const projectApp = admin.initializeApp(
+  {
+    credential: admin.credential.cert({
+      ...projectpartnerServiceAccount,
+      private_key: projectpartnerServiceAccount.private_key.replace(/\\n/g, "\n"),
+    }),
+  },
+  "projectpartner"
+);
+
 async function sendTPNotification(token, title, body) {
   if (!token) return; // safety check
   const message = {
@@ -77,6 +92,50 @@ async function sendSPNotification(token, title, body) {
   } catch (err) {
     console.error(" Error sending SP notification:", err);
   }
+}
+
+// Send notification to Salesperson
+async function sendPPNotification(token, title, body) {
+  if (!token) return; // safety check
+  const message = {
+    token,
+    notification: { title, body },
+    android: { priority: "high" },
+    apns: { headers: { "apns-priority": "10" } },
+  };
+
+  try {
+    const response = await projectApp.messaging().send(message);
+    console.log(" Salesperson notification sent:", response);
+  } catch (err) {
+    console.error(" Error sending SP notification:", err);
+  }
+}
+
+
+function formatTime(timeString) {
+  if (!timeString) return "--:--";
+
+  const [h, m] = timeString.split(":");
+  let hour = parseInt(h);
+  const minute = m;
+
+  const ampm = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12 || 12;
+
+  return `${hour}:${minute} ${ampm}`;
+}
+
+function formatDate(dateString) {
+  if (!dateString) return "";
+
+  const date = new Date(dateString);
+  
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 const cleanInactiveUntil = async () => {
@@ -527,3 +586,164 @@ const queryAsync = (sql, params = []) => {
 //     console.error(" Error in subscription cron:", error);
 //   }
 // });
+
+export const checkcalendernotes = () => {
+  const sql = `
+    SELECT c.id, c.note, c.date, c.time,
+           c.projectPartnerId, pp.onesignalid AS project_onesignal,
+           c.salesPartnerId, sp.onesignalid AS sales_onesignal,
+           c.territoryPartnerId, tp.onesignalid AS territory_onesignal
+    FROM calendernotes c 
+    LEFT JOIN projectpartner pp ON pp.id = c.projectPartnerId
+    LEFT JOIN salespersons sp ON sp.salespersonsid = c.salesPartnerId
+    LEFT JOIN territorypartner tp ON tp.id = c.territoryPartnerId
+    WHERE c.notified = 0
+      AND c.date = CURDATE()
+      AND TIMESTAMP(c.date, c.time) <= NOW() + INTERVAL 10 MINUTE
+      AND TIMESTAMP(c.date, c.time) > NOW()
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error("Calendar Notes Check Error:", err);
+      return;
+    }
+
+    if (!results.length) {
+      console.log("No upcoming notes within next 10 minutes.");
+      return;
+    }
+
+    console.log("Notes to notify:", results);
+
+    results.forEach(async (row) => {
+      const title = "⏰ Upcoming Reminder";
+      const msg = `You have a scheduled note at ${formatTime(row.time)} on ${formatDate(row.date)}.
+Note: ${row.note}`;
+
+      // ---- SEND NOTIFICATION TO PROJECT PARTNER ----
+      if (row.project_onesignal) {
+        try {
+          await sendPPNotification(row.project_onesignal, title, msg);
+          console.log("PP notified:", row.project_onesignal);
+        } catch (e) {
+          console.error("PP notification error:", e);
+        }
+      }
+
+      // ---- SEND NOTIFICATION TO SALES PARTNER ----
+      if (row.sales_onesignal) {
+        try {
+          await sendSPNotification(row.sales_onesignal, title, msg);
+          console.log("Sales notified:", row.sales_onesignal);
+        } catch (e) {
+          console.error("Sales notification error:", e);
+        }
+      }
+
+      // ---- SEND NOTIFICATION TO TERRITORY PARTNER ----
+      if (row.territory_onesignal) {
+        try {
+          await sendTPNotification(row.territory_onesignal, title, msg);
+          console.log("Territory notified:", row.territory_onesignal);
+        } catch (e) {
+          console.error("Territory notification error:", e);
+        }
+      }
+
+      // ---- UPDATE notified = 1 ----
+      db.query(
+        "UPDATE calendernotes SET notified = 1 WHERE id = ?",
+        [row.id],
+        (updateErr) => {
+          if (updateErr) {
+            console.error("Update notify flag error:", updateErr);
+          }
+        }
+      );
+    });
+  });
+};
+
+
+
+
+cron.schedule("* * * * * ", checkcalendernotes);
+
+function notifyProjectPartnerForNewEnquiry() {
+  try {
+    // 1) Get all enquiries where pp_notified = 0
+    db.query(
+      `
+      SELECT 
+        e.enquirersid,
+        e.propertyid,
+        p.projectpartnerid,
+        p.propertyName,
+        p.location,
+        pp.onesignalid AS token
+      FROM enquirers e
+      INNER JOIN properties p ON e.propertyid = p.propertyid
+      INNER JOIN projectpartner pp ON p.projectpartnerid = pp.id
+      WHERE e.pp_notified = 0
+    `,
+      async (err, rows) => {
+        if (err) {
+          console.log("DB Error while fetching enquiries:", err);
+          return;
+        }
+
+        if (!rows || rows.length === 0) {
+          console.log("No new enquiries found.");
+          return;
+        }
+
+        // 2) Loop enquiries and notify
+        for (let enquiry of rows) {
+          const { token, propertyName, location, enquirersid } = enquiry;
+
+          if (!token) {
+            console.log("❌ Project partner token missing.");
+            continue;
+          }
+
+          const title = "📩 New Enquiry Received";
+          const message = `You have a new enquiry for:
+🏡 Property: ${propertyName}
+📍 Location: ${location}`;
+
+          try {
+            await sendPPNotification(token, title, message);
+            console.log("Notification sent to:", token);
+          } catch (notifyErr) {
+            console.log("Error sending push notification:", notifyErr);
+            continue;
+          }
+
+          // 3) Update pp_notified = 1
+          db.query(
+            `UPDATE enquirers SET pp_notified = 1 WHERE enquirersid = ?`,
+            [enquirersid],
+            (updateErr) => {
+              if (updateErr) {
+                console.log(
+                  "Error updating pp_notified for enquiry:",
+                  enquirersid,
+                  updateErr
+                );
+              } else {
+                console.log(`pp_notified updated for enquiry ${enquirersid}`);
+              }
+            }
+          );
+        }
+      }
+    );
+  } catch (error) {
+    console.log("Error sending new enquiry notifications:", error);
+  }
+}
+
+
+
+cron.schedule("* * * * *", notifyProjectPartnerForNewEnquiry);

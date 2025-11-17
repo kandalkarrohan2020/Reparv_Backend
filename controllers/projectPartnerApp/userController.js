@@ -182,3 +182,46 @@ export const getProjectPartner = async (req, res) => {
     });
   }
 };
+
+export const updateOneSignalId = async (req, res) => {
+  const { onesignalId } = req.body;
+console.log(onesignalId);
+
+  const id = req.params.id;
+  console.log(id);
+  
+  if (!onesignalId) {
+    return res
+      .status(400)
+      .json({ success: false, message: "onesignalId is required" });
+  }
+  try {
+    const query = `UPDATE projectpartner SET onesignalid = ? WHERE id = ?`;
+    db.query(query, [onesignalId, id], (err, result) => {
+      if (err) {
+        console.error("OneSignal update error:", err);
+        return res
+          .status(500)
+          .json({ success: false, message: "Database error" });
+      }
+
+      if (result.affectedRows === 0) {
+        console.log("not");
+
+        return res
+          .status(404)
+          .json({ success: false, message: "User not found" });
+      }
+      console.log("suucess");
+
+      return res.json({
+        success: true,
+        message: "OneSignal ID stored successfully",
+        onesignalId,
+      });
+    });
+  } catch (error) {
+    console.error("Server error:", error);
+    res.status(500).json({ success: false, message: "Something went wrong" });
+  }
+};

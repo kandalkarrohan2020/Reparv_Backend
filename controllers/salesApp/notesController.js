@@ -3,20 +3,21 @@ import db from "../../config/dbconnect.js";
 
 
 export const addNote = (req, res) => {
-  const { projectPartnerId, salesPartnerId, territoryPartnerId, date, note } = req.body;
+  const { projectPartnerId, salesPartnerId, territoryPartnerId, date, note,time } = req.body;
+console.log(req.body);
 
   if (!date) return res.status(400).json({ message: "date is required" });
   if (!note || note.trim() === "") return res.status(400).json({ message: "note cannot be empty" });
 
   const sql = `
     INSERT INTO calenderNotes 
-    (projectPartnerId, salesPartnerId, territoryPartnerId, date, note)
-    VALUES (?, ?, ?, ?, ?)
+    (projectPartnerId, salesPartnerId, territoryPartnerId, date, note,time)
+    VALUES (?, ?, ?, ?, ?,?)
   `;
 
   db.query(
     sql,
-    [projectPartnerId || null, salesPartnerId || null, territoryPartnerId || null, date, note],
+    [projectPartnerId || null, salesPartnerId || null, territoryPartnerId || null, date, note,time],
     (err, result) => {
       if (err) {
         console.error("Error inserting note:", err);

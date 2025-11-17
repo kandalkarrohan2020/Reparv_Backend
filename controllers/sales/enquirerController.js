@@ -416,16 +416,17 @@ export const visitScheduled = (req, res) => {
 
 export const token = (req, res) => {
   const currentdate = moment().format("YYYY-MM-DD HH:mm:ss");
-  const { paymenttype, tokenamount, remark, dealamount, enquiryStatus } =
+  const { paymenttype, tokenamount, remark, dealamount, enquiryStatus,propertyinfoid} =
     req.body;
   const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
+
 
   if (
     !paymenttype ||
     !tokenamount ||
     !remark ||
     !dealamount ||
-    !enquiryStatus
+    !enquiryStatus 
   ) {
     return res.status(400).json({ message: "Please add all required fields!" });
   }
@@ -482,10 +483,10 @@ export const token = (req, res) => {
           // Step 3: Insert into propertyfollowup
           const insertSQL = `
           INSERT INTO propertyfollowup (
-            enquirerid, paymenttype, tokenamount, remark, dealamount, status, 
+            enquirerid, paymenttype, tokenamount, remark, dealamount, status, propertyinfoid,
             totalcommission, reparvcommission, salescommission, territorycommission, paymentimage,
             updated_at, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)
         `;
 
           db.query(
@@ -497,6 +498,8 @@ export const token = (req, res) => {
               remark,
               dealamount,
               enquiryStatus,
+              propertyId || null,
+             
               finalCommissionAmount,
               reparvCommission,
               salesCommission,
