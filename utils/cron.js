@@ -707,7 +707,7 @@ Note: ${row.note}`;
   });
 };
 
-cron.schedule("* * * * * ", checkcalendernotes);
+cron.schedule("* * * * *", checkcalendernotes);
 
 function notifyProjectPartnerForNewEnquiry() {
   try {
